@@ -14,13 +14,12 @@ import tempfile
 from pathlib import Path
 from typing import Optional
 
-# Check for marker import
+# Check for pymupdf4llm (best quality, handles math well)
 try:
-    from marker.convert import convert_single_pdf
-    from marker.models import load_all_models
-    MARKER_AVAILABLE = True
+    import pymupdf4llm
+    PYMUPDF4LLM_AVAILABLE = True
 except ImportError:
-    MARKER_AVAILABLE = False
+    PYMUPDF4LLM_AVAILABLE = False
 
 # Fallback imports for basic PDF processing
 try:
@@ -34,21 +33,119 @@ except ImportError:
         PYMUPDF_AVAILABLE = False
 
 
-def convert_with_marker(pdf_path: str, output_dir: Optional[str] = None) -> str:
-    """Convert PDF to Markdown using Marker (best quality)."""
-    if not MARKER_AVAILABLE:
-        raise ImportError("Marker is not installed. Install with: pip install marker-pdf")
+def has_text_content(pdf_path: str) -> bool:
+    """Check if PDF has extractable text or is scanned/image-based."""
+    if not PYMUPDF_AVAILABLE:
+        return True  # Assume text if we can't check
 
-    print(f"Converting {pdf_path} with Marker (this may take a moment on first run)...")
+    doc = pymupdf.open(pdf_path)
+    total_text_len = 0
 
-    # Load models (cached after first run)
-    model_lst = load_all_models()
+    for page in doc:
+        text = page.get_text("text")
+        total_text_len += len(text.strip())
+        if total_text_len > 100:  # Found enough text
+            doc.close()
+            return True
 
-    # Convert the PDF
-    full_text, images, out_meta = convert_single_pdf(pdf_path, model_lst)
+    doc.close()
+    return total_text_len > 50  # Minimal text threshold
+
+
+def convert_with_ocr(pdf_path: str) -> str:
+    """Convert scanned PDF using OCR."""
+    if not PYMUPDF_AVAILABLE:
+        raise ImportError("PyMuPDF is not installed. Install with: pip install pymupdf")
+
+    print(f"Converting {pdf_path} with OCR (scanned document detected)...")
+
+    doc = pymupdf.open(pdf_path)
+    text_parts = []
+
+    for page_num, page in enumerate(doc, 1):
+        print(f"  OCR page {page_num}/{len(doc)}...", end="\r")
+
+        # Get page as high-res image for OCR
+        # Use pymupdf's built-in OCR with tesseract
+        try:
+            # Try to use get_textpage with OCR
+            tp = page.get_textpage(flags=pymupdf.TEXT_PRESERVE_WHITESPACE)
+            text = page.get_text("text", textpage=tp)
+
+            if not text.strip():
+                # Fallback: render to image and OCR with tesseract directly
+                pix = page.get_pixmap(dpi=300)
+                text = pix.pdfocr_tobytes()  # OCR via tesseract
+                if isinstance(text, bytes):
+                    # This returns a PDF, need different approach
+                    # Use page.get_text with OCR flag
+                    text = page.get_text("text", flags=pymupdf.TEXT_PRESERVE_WHITESPACE)
+        except Exception:
+            # Simpler fallback
+            text = page.get_text("text")
+
+        if text.strip():
+            text_parts.append(f"## Page {page_num}\n\n{text.strip()}")
+
+    print()  # Clear the progress line
+    doc.close()
+
+    if not text_parts:
+        # Last resort: try ocrmypdf-style conversion
+        return convert_with_tesseract_direct(pdf_path)
+
+    markdown_text = "\n\n---\n\n".join(text_parts)
+    return postprocess_markdown(markdown_text)
+
+
+def convert_with_tesseract_direct(pdf_path: str) -> str:
+    """Direct OCR using pdf2image and pytesseract as fallback."""
+    try:
+        from pdf2image import convert_from_path
+        import pytesseract
+    except ImportError:
+        raise ImportError(
+            "For scanned PDFs, install: pip install pdf2image pytesseract\n"
+            "Also ensure tesseract is installed: brew install tesseract"
+        )
+
+    print(f"Converting {pdf_path} with direct Tesseract OCR...")
+
+    images = convert_from_path(pdf_path, dpi=300)
+    text_parts = []
+
+    for i, image in enumerate(images, 1):
+        print(f"  OCR page {i}/{len(images)}...", end="\r")
+        text = pytesseract.image_to_string(image)
+        if text.strip():
+            text_parts.append(f"## Page {i}\n\n{text.strip()}")
+
+    print()
+    markdown_text = "\n\n---\n\n".join(text_parts)
+    return postprocess_markdown(markdown_text)
+
+
+def convert_with_pymupdf4llm(pdf_path: str, force_ocr: bool = False) -> str:
+    """Convert PDF to Markdown using pymupdf4llm (good quality, fast)."""
+    if not PYMUPDF4LLM_AVAILABLE:
+        raise ImportError("pymupdf4llm is not installed. Install with: pip install pymupdf4llm")
+
+    # Check if PDF needs OCR
+    if force_ocr or not has_text_content(pdf_path):
+        return convert_with_ocr(pdf_path)
+
+    print(f"Converting {pdf_path} with pymupdf4llm...")
+
+    # Convert to markdown
+    markdown_text = pymupdf4llm.to_markdown(pdf_path)
+
+    # If output is empty, try OCR
+    if not markdown_text.strip():
+        print("No text extracted, trying OCR...")
+        return convert_with_ocr(pdf_path)
 
     # Post-process for Obsidian compatibility
-    markdown_text = postprocess_markdown(full_text)
+    markdown_text = postprocess_markdown(markdown_text)
 
     return markdown_text
 
@@ -171,19 +268,19 @@ def convert_pdf(
 
     # Convert
     try:
-        if use_marker and MARKER_AVAILABLE:
-            markdown_text = convert_with_marker(pdf_path)
+        if use_marker and PYMUPDF4LLM_AVAILABLE:
+            markdown_text = convert_with_pymupdf4llm(pdf_path)
         elif PYMUPDF_AVAILABLE:
-            print("Note: Using basic conversion. Install marker-pdf for better results.")
+            print("Note: Using basic conversion. Install pymupdf4llm for better results.")
             markdown_text = convert_with_pymupdf(pdf_path)
         else:
             raise ImportError(
                 "No PDF conversion library available. "
-                "Install with: pip install marker-pdf"
+                "Install with: pip install pymupdf4llm"
             )
     except Exception as e:
         print(f"Error during conversion: {e}")
-        if use_marker and PYMUPDF_AVAILABLE:
+        if PYMUPDF_AVAILABLE:
             print("Falling back to basic conversion...")
             markdown_text = convert_with_pymupdf(pdf_path)
         else:

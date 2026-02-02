@@ -1,5 +1,9 @@
-# Core - Marker PDF converter (best quality)
-marker-pdf>=1.0.0
+# Core - PDF to Markdown conversion with good quality
+pymupdf4llm>=0.2.0
 
-# Fallback - basic PDF text extraction
+# Base PDF library (included with pymupdf4llm)
 pymupdf>=1.24.0
+
+# OCR support for scanned PDFs
+pdf2image>=1.16.0
+pytesseract>=0.3.10
