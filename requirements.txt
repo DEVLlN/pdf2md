@@ -1,0 +1,5 @@
+# Core - Marker PDF converter (best quality)
+marker-pdf>=1.0.0
+
+# Fallback - basic PDF text extraction
+pymupdf>=1.24.0
