@@ -1,0 +1,87 @@
+name: Convert PDFs to Markdown
+
+on:
+  # Run when PDFs are added/changed
+  push:
+    paths:
+      - '**.pdf'
+
+  # Run on pull requests with PDFs
+  pull_request:
+    paths:
+      - '**.pdf'
+
+  # Allow manual trigger
+  workflow_dispatch:
+    inputs:
+      pdf_path:
+        description: 'Path to PDF file or directory (default: entire repo)'
+        required: false
+        default: '.'
+
+jobs:
+  convert:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install Tesseract OCR
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y tesseract-ocr poppler-utils
+
+      - name: Install pdf2md
+        run: |
+          pip install pymupdf4llm pymupdf pdf2image pytesseract
+
+      - name: Download pdf2md script
+        run: |
+          curl -sL https://raw.githubusercontent.com/DEVLlN/pdf2md/master/pdf2md.py -o pdf2md.py
+
+      - name: Find and convert PDFs
+        run: |
+          # Find all PDFs in the repo
+          PDF_PATH="${{ github.event.inputs.pdf_path || '.' }}"
+
+          echo "Looking for PDFs in: $PDF_PATH"
+
+          find "$PDF_PATH" -name "*.pdf" -type f | while read pdf; do
+            echo "Converting: $pdf"
+            python pdf2md.py "$pdf" || echo "Warning: Failed to convert $pdf"
+          done
+
+          echo "Conversion complete!"
+
+      - name: List generated files
+        run: |
+          echo "Generated markdown files:"
+          find . -name "*.md" -newer .git -type f 2>/dev/null || true
+          echo ""
+          echo "Generated image directories:"
+          find . -name "*_images" -type d 2>/dev/null || true
+
+      - name: Commit converted files
+        run: |
+          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "github-actions[bot]"
+
+          # Add all markdown files and image directories
+          git add "*.md" "*_images/" 2>/dev/null || true
+
+          # Check if there are changes to commit
+          if git diff --staged --quiet; then
+            echo "No new conversions to commit"
+          else
+            git commit -m "Convert PDFs to Markdown
+
+            Automatically converted by pdf2md GitHub Action"
+            git push
+          fi

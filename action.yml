@@ -1,0 +1,72 @@
+name: 'PDF to Markdown'
+description: 'Convert PDF files to Markdown with LaTeX math support and image extraction'
+author: 'DEVLlN'
+
+branding:
+  icon: 'file-text'
+  color: 'purple'
+
+inputs:
+  pdf_path:
+    description: 'Path to PDF file or directory containing PDFs'
+    required: false
+    default: '.'
+  output_dir:
+    description: 'Output directory for markdown files (default: same as PDF location)'
+    required: false
+    default: ''
+  recursive:
+    description: 'Process subdirectories recursively'
+    required: false
+    default: 'false'
+
+outputs:
+  converted_files:
+    description: 'List of converted markdown files'
+    value: ${{ steps.convert.outputs.files }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Install Tesseract OCR
+      shell: bash
+      run: |
+        if command -v apt-get &> /dev/null; then
+          sudo apt-get update
+          sudo apt-get install -y tesseract-ocr poppler-utils
+        elif command -v brew &> /dev/null; then
+          brew install tesseract poppler
+        fi
+
+    - name: Install Python dependencies
+      shell: bash
+      run: |
+        pip install pymupdf4llm pymupdf pdf2image pytesseract
+
+    - name: Download pdf2md script
+      shell: bash
+      run: |
+        curl -sL https://raw.githubusercontent.com/DEVLlN/pdf2md/master/pdf2md.py -o /tmp/pdf2md.py
+
+    - name: Convert PDFs
+      id: convert
+      shell: bash
+      run: |
+        PDF_PATH="${{ inputs.pdf_path }}"
+        OUTPUT_DIR="${{ inputs.output_dir }}"
+        RECURSIVE="${{ inputs.recursive }}"
+
+        ARGS=""
+        if [ -n "$OUTPUT_DIR" ]; then
+          ARGS="$ARGS -o $OUTPUT_DIR"
+        fi
+        if [ "$RECURSIVE" = "true" ]; then
+          ARGS="$ARGS -r"
+        fi
+
+        echo "Converting PDFs in: $PDF_PATH"
+        python /tmp/pdf2md.py "$PDF_PATH" $ARGS
+
+        # Output list of converted files
+        FILES=$(find . -name "*.md" -newer .git -type f 2>/dev/null | tr '\n' ' ')
+        echo "files=$FILES" >> $GITHUB_OUTPUT

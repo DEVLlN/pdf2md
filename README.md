@@ -1,31 +1,70 @@
 # pdf2md
 
-Convert PDFs to Markdown with LaTeX math support. Perfect for:
-- Goodnotes exports to Obsidian
-- Academic papers and textbooks
-- Handwritten notes with equations
-- Any PDF with math content
+Convert PDFs to Markdown with LaTeX math support and image extraction.
+
+<p align="center">
+  <a href="https://github.com/DEVLlN/pdf2md/actions/workflows/convert.yml">
+    <img src="https://github.com/DEVLlN/pdf2md/actions/workflows/convert.yml/badge.svg" alt="Convert PDFs">
+  </a>
+</p>
 
 ## Features
 
-- **Text & Scanned PDFs** - Handles both digital and scanned documents
-- **LaTeX Math** - Converts equations to Obsidian-compatible `$$` syntax
+- **Text & Scanned PDFs** - Handles both digital and scanned documents with OCR
+- **Image Extraction** - Extracts embedded images and detects drawings/diagrams
+- **LaTeX Math** - Preserves equations in Obsidian-compatible `$$` syntax
+- **GitHub Action** - Automatically convert PDFs in your repos
 - **Batch Processing** - Convert entire directories at once
-- **Fast Fallback** - Basic mode for quick conversions
 - **Obsidian Ready** - Output works perfectly with Obsidian
 
-## Installation
+## Quick Start
 
-```bash
-pip install pdf2md
+### Use as GitHub Action (Easiest)
+
+Add this workflow to your repo at `.github/workflows/convert-pdfs.yml`:
+
+```yaml
+name: Convert PDFs to Markdown
+
+on:
+  push:
+    paths:
+      - '**.pdf'
+  workflow_dispatch:
+
+jobs:
+  convert:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Convert PDFs
+        uses: DEVLlN/pdf2md@master
+
+      - name: Commit results
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add "*.md" "*_images/" 2>/dev/null || true
+          git diff --staged --quiet || git commit -m "Convert PDFs to Markdown"
+          git push
 ```
 
-Or install from source:
+Now any PDF you push will automatically be converted to Markdown!
+
+### Use Locally (CLI)
 
 ```bash
-git clone https://github.com/DEVLlN/pdf2md.git
-cd pdf2md
-pip install -e .
+# Install dependencies
+pip install pymupdf4llm pymupdf pdf2image pytesseract
+
+# For OCR support, also install Tesseract:
+# macOS: brew install tesseract
+# Ubuntu: sudo apt install tesseract-ocr
+
+# Download and run
+curl -sL https://raw.githubusercontent.com/DEVLlN/pdf2md/master/pdf2md.py -o pdf2md.py
+python pdf2md.py document.pdf
 ```
 
 ## Usage
@@ -33,27 +72,27 @@ pip install -e .
 ### Single File
 
 ```bash
-# Convert a PDF (output: document.md)
-pdf2md document.pdf
+# Convert a PDF (output: document.md + document_images/)
+python pdf2md.py document.pdf
 
 # Specify output name
-pdf2md document.pdf -o notes.md
+python pdf2md.py document.pdf -o notes.md
 ```
 
 ### Directory
 
 ```bash
 # Convert all PDFs in a folder
-pdf2md ./pdfs/ -o ./markdown/
+python pdf2md.py ./pdfs/ -o ./markdown/
 
 # Recursive (include subfolders)
-pdf2md ./pdfs/ -r -o ./markdown/
+python pdf2md.py ./pdfs/ -r -o ./markdown/
 ```
 
 ### Options
 
 ```
-pdf2md [input] [options]
+python pdf2md.py [input] [options]
 
 Arguments:
   input              PDF file or directory to convert
@@ -61,21 +100,29 @@ Arguments:
 Options:
   -o, --output       Output file or directory
   -r, --recursive    Process directories recursively
-  --basic            Use basic conversion (faster, lower quality)
+  --basic            Use basic conversion (faster, no OCR)
   --version          Show version
   -h, --help         Show help
 ```
 
 ## Output Format
 
-The output is Obsidian-compatible Markdown with:
+Each PDF creates:
+- A `.md` file with the text content
+- A `_images/` folder with extracted images and drawings
 
-- YAML frontmatter with source info
-- Headings preserved from document structure
-- Math equations in `$$` blocks (display) and `$` (inline)
-- Images extracted and embedded (when using Marker)
+```
+document.pdf
+    ↓
+document.md
+document_images/
+  ├── document_p1_img0.png
+  ├── document_p1_drawing0.png
+  ├── document_p2_img0.png
+  └── ...
+```
 
-Example output:
+Example markdown output:
 
 ```markdown
 ---
@@ -92,67 +139,64 @@ x = \frac{-b \pm \sqrt{b^2 - 4ac}}{2a}
 $$
 
 For inline math like $E = mc^2$, we use single dollar signs.
+
+![drawing from page 1](lecture-notes_images/lecture-notes_p1_drawing0.png)
 ```
 
 ## Workflows
 
-### Goodnotes → Obsidian
+### Goodnotes → GitHub → Obsidian
 
-1. Export from Goodnotes as PDF to Google Drive
-2. Run `pdf2md` on the PDF
-3. Move the `.md` file to your Obsidian vault
+1. Export from Goodnotes as PDF
+2. Push PDF to a GitHub repo with the Action enabled
+3. Pull the auto-generated markdown into your Obsidian vault
 
-```bash
-# One-liner
-pdf2md ~/Google\ Drive/Goodnotes/*.pdf -o ~/Obsidian/Notes/
-```
-
-### Batch Convert Textbooks
+### Local Batch Convert
 
 ```bash
-pdf2md ./textbooks/ -r -o ./markdown/textbooks/
+# Convert all PDFs in a folder
+python pdf2md.py ~/Documents/PDFs/ -r -o ~/Obsidian/Notes/
 ```
 
 ## How It Works
 
-pdf2md uses [Marker](https://github.com/VikParuchuri/marker) under the hood, which:
-
-1. Detects if PDF is text-based or scanned
-2. Uses OCR for scanned documents
-3. Identifies math regions
-4. Converts to clean Markdown with LaTeX
-
-For faster (but lower quality) conversion, use `--basic` mode which extracts text directly without OCR.
+1. **Text Detection** - Checks if PDF has selectable text or is scanned
+2. **OCR** - Uses Tesseract for scanned documents
+3. **Image Extraction** - Extracts embedded images and renders drawing regions
+4. **Markdown Generation** - Converts to clean, Obsidian-compatible markdown
 
 ## Requirements
 
 - Python 3.9+
-- ~2GB disk space for Marker models (downloaded on first run)
+- Tesseract OCR (for scanned PDFs)
+- ~100MB for dependencies
 
 ## Troubleshooting
 
-### "Marker is not installed"
+### No text extracted from scanned PDF
 
+Make sure Tesseract is installed:
 ```bash
-pip install marker-pdf
+# macOS
+brew install tesseract
+
+# Ubuntu/Debian
+sudo apt install tesseract-ocr
+
+# Windows
+choco install tesseract
 ```
 
-### Slow first run
+### Images not displaying in Obsidian
 
-The first conversion downloads ML models (~2GB). Subsequent runs are faster.
+Ensure the `_images` folder is in the same directory as the markdown file in your vault.
 
-### Poor math quality
+### Poor OCR quality on handwritten notes
 
-- Ensure the PDF is high resolution
-- Try without `--basic` flag
-- For handwritten math, ensure writing is clear
-
-### Memory issues
-
-For large PDFs, Marker can use significant RAM. Try:
-- Processing fewer pages at once
-- Using `--basic` mode
-- Closing other applications
+Handwriting recognition is limited with Tesseract. For best results:
+- Use clear, large handwriting
+- Ensure good contrast in the PDF
+- Consider using Goodnotes' built-in text export for handwritten content
 
 ## License
 
